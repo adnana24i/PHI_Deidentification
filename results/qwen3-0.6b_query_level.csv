@@ -1,0 +1,4 @@
+condition,queries_with_phi,leak_free_rate,queries_without_phi,false_alarm_rate
+zeroshot,832,0.0096,219,0.3014
+fewshot,832,0.0745,219,0.0365
+presidio,832,0.3101,219,0.9041

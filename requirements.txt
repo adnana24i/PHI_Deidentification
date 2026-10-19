@@ -1,0 +1,10 @@
+torch
+transformers>=4.56
+outlines>=1.0
+pydantic>=2
+pandas
+matplotlib
+presidio-analyzer
+tqdm
+ipykernel
+ipywidgets
