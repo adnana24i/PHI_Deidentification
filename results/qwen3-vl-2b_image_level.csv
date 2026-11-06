@@ -1,0 +1,4 @@
+condition,images_with_phi,leak_free_rate,images_without_phi,false_alarm_rate
+zeroshot,10,0.0,81,0.3457
+fewshot,10,0.0,81,0.0
+presidio,10,0.5,81,0.037

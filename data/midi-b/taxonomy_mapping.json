@@ -1,0 +1,23 @@
+{
+  "_comment": "MIDI-B side of the shared PHI taxonomy (Step 1). Kept separate from the repo-root data/taxonomy_mapping.json, which is a generated artifact the text-track notebook (asq_process.ipynb) overwrites on every run from its own ASQ-PHI-only SHARED_TAXONOMY dict -- editing that file directly would be silently lost. The shared label set itself (NAME, DATE, LOCATION, CONTACT, ID) is identical between tracks; this file only adds the MIDI-B -> shared-label side.",
+  "SHARED_TAXONOMY_SOURCE": "data/taxonomy_mapping.json (written by asq_process.ipynb)",
+  "MIDIB_TO_SHARED": {
+    "patient_name": "NAME",
+    "date": "DATE",
+    "patient_birth_date": "DATE"
+  },
+  "MIDIB_UNMAPPED": {
+    "patient_sex": "No shared-taxonomy category fits (not a name/date/location/contact/id). Excluded from scoring -- any model/baseline prediction classified as patient-sex information has no gold counterpart to match against."
+  },
+  "SUPPORT_IN_OUR_91_IMAGE_SUBSET": {
+    "_note": "35 of the 91 images have a pixels_hidden (burned-in text redaction) span in the MIDI-B answer key, but 25 of those are technologist initials (e.g. 'JT', 'TJN') that MIDI-B's answer key leaves with an empty categories list -- not patient PHI, not mappable to any shared label. Only 10 images carry a categorized span with a shared-taxonomy home (the name+sex+date+birthdate bundle described in CROSS_MODALITY_COMPARISON_NOTE); the other 81 are true negatives for this taxonomy. NAME/DATE counts below are gold ROWS after dedup (one row per image per shared label -- 'date' and 'patient_birth_date' both map to DATE and collapse to one row per image, since both dates live in the same bundled text blob with no way to tell them apart without further parsing).",
+    "images_with_any_pixels_hidden_span": 35,
+    "images_with_shared_taxonomy_PHI": 10,
+    "NAME": 10,
+    "DATE": 10,
+    "LOCATION": 0,
+    "CONTACT": 0,
+    "ID": 0
+  },
+  "CROSS_MODALITY_COMPARISON_NOTE": "Per Step 1/Step 5 of the proposal, the cross-modality comparison must be restricted to shared categories with real support in BOTH datasets. In this 91-image subset only NAME and DATE occur at all (LOCATION/CONTACT/ID never appear as burned-in pixel text here) -- restrict any text-vs-image comparison to NAME and DATE, and report LOCATION/CONTACT/ID as 'no support in MIDI-B subset' rather than silently scoring them as 0."
+}

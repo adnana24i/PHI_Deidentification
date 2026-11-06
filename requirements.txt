@@ -1,4 +1,4 @@
-torch
+torch>=2.6
 transformers>=4.56
 outlines>=1.0
 pydantic>=2
@@ -8,3 +8,7 @@ presidio-analyzer
 tqdm
 ipykernel
 ipywidgets
+
+pydicom
+Pillow
+ocrmac; sys_platform == "darwin"

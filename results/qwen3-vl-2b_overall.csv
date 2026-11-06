@@ -1,0 +1,10 @@
+condition,mode,TP,FP,FN,precision,recall,f1
+zeroshot,strict,0,91,30,0.0,0.0,
+zeroshot,overlap,18,73,12,0.1978,0.6,0.2975
+zeroshot,any,18,73,12,0.1978,0.6,0.2975
+fewshot,strict,0,4,30,0.0,0.0,
+fewshot,overlap,4,0,26,1.0,0.1333,0.2353
+fewshot,any,4,0,26,1.0,0.1333,0.2353
+presidio,strict,0,29,30,0.0,0.0,
+presidio,overlap,17,12,13,0.5862,0.5667,0.5763
+presidio,any,23,6,7,0.7931,0.7667,0.7797

@@ -1,0 +1,7 @@
+# MIDI-B raw DICOM (~2.3 GB, 91 images), re-downloadable via vlm/download_midi_b.py
+# and data/midi-b/manifests/MIDI-B-CR-DX-MG-Validation.tcia
+data/midi-b/dicom/
+
+__pycache__/
+*.pyc
+.DS_Store
