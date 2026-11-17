@@ -11,14 +11,15 @@ Clinical Text and Medical Images*.
 | 2 | `extract_ground_truth.py` | the MIDI-B answer-key DB (fetched manually once) | `data/midi-b/ground_truth_cr_dx_mg_validation.jsonl` |
 | 3 | `dicom_to_png.py` | the downloaded DICOMs | `data/midi-b/images_png/*.png` + `manifest.csv` |
 | 4 | `vlm_ocr.py` | the PNGs | `data/midi-b/ocr_transcripts_qwen3vl-2b.jsonl` (Qwen3-VL-2B-Instruct, CPU, ~35-90s/image) |
-| 5 | `vlm_classify.py` | the OCR transcripts | `predictions/qwen3-vl-2b_{zeroshot,fewshot}.jsonl` (Qwen3-0.6B + outlines, same prompt/schema as the text track) |
+| 5 | `vlm_classify.py` | the OCR transcripts | `predictions/qwen3-vl-2b_{zeroshot,fewshot}.jsonl` (Qwen3-0.6B + outlines, same schema and few-shot examples as the text track, OCR-adapted system prompt) |
 | 6 | `vlm_baseline.py` | the PNGs | `predictions/qwen3-vl-2b_presidio.jsonl` (non-LLM: ocrmac OCR + Presidio classify) |
 | 7 | `vlm_score.py` | the three prediction files | `results/qwen3-vl-2b_{outcomes,overall,per_category,image_level}.csv` |
 | 8 | `spot_check.py` | predictions + outcomes | `results/figures/qwen3-vl-2b_spotcheck_*.png` + a printed gold-vs-prediction report |
 | 9 | `vlm_benchmark_visualisations.ipynb` | the CSVs from step 7 (+ `results/qwen3-0.6b_per_category.csv` from the text track, for Section 5) | `results/figures/qwen3-vl-2b_{overall,per_category,per_modality,image_level,cross_modality}.png` |
 
-`vlm_common.py` is a shared library (taxonomy, prompt, alignment, matching/metrics),
-not a pipeline step.
+Taxonomy, prompts, alignment, scoring and the Presidio mapping come from the shared
+`phi_deid/` package, which the text track uses too. `vlm_common.py` only loads the
+MIDI-B gold set, and `paths.py` holds the file paths; neither is a pipeline step.
 
 ## Run the scripts
 

@@ -21,7 +21,7 @@ DB = DATA_DIR / "answer-keys" / "validation" / "MIDI-B-Answer-Key-Validation.db"
 TAG_RE = re.compile(r"<(.*)>$")
 
 
-def unwrap(v):
+def unwrap(v: object) -> object:
     if isinstance(v, str):
         m = TAG_RE.match(v)
         if m:

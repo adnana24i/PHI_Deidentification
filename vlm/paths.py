@@ -1,8 +1,13 @@
 """Shared path constants for the VLM-track scripts."""
 
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# make the shared phi_deid package importable even without `pip install -e .`
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 DATA_DIR = ROOT / "data" / "midi-b"
 DICOM_DIR = DATA_DIR / "dicom" / "synthetic-validation"

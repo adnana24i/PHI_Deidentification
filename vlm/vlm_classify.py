@@ -9,24 +9,28 @@ Resumable: ids already in a condition's prediction file are skipped.
 
 import json
 import time
+from pathlib import Path
 
 from paths import OCR_TRANSCRIPTS_PATH, PRED_DIR
-from vlm_common import Extraction, align, build_messages, parse
+
+from phi_deid.alignment import align
+from phi_deid.prompts import SYSTEM_OCR, Extraction, build_messages, parse
 
 MODEL_ID = "Qwen/Qwen3-0.6B"
 MODEL_TAG = "qwen3-vl-2b"   # tags the VLM-TRACK pipeline (Qwen3-VL OCR + Qwen3 classify), not the classify model alone
 CONDITIONS = {"zeroshot": False, "fewshot": True}
+SEED = 42
 
 
-def load_transcripts():
+def load_transcripts() -> dict[str, dict]:
     return {json.loads(l)["sop_instance_uid"]: json.loads(l) for l in OCR_TRANSCRIPTS_PATH.open()}
 
 
-def pred_path(condition):
+def pred_path(condition: str) -> Path:
     return PRED_DIR / f"{MODEL_TAG}_{condition}.jsonl"
 
 
-def todo_for(condition, records):
+def todo_for(condition: str, records: list[dict]) -> list[dict]:
     done = set()
     p = pred_path(condition)
     if p.exists():
@@ -34,7 +38,7 @@ def todo_for(condition, records):
     return [r for r in records if r["sop_instance_uid"] not in done]
 
 
-def main():
+def main() -> None:
     records = list(load_transcripts().values())
     print(f"{len(records)} OCR transcripts available")
 
@@ -63,11 +67,11 @@ def main():
         with pred_path(condition).open("a", encoding="utf-8") as f:
             for i, r in enumerate(todo, 1):
                 text = r["transcript"]
-                messages = build_messages(text, fewshot)
+                messages = build_messages(text, fewshot, system=SYSTEM_OCR)
                 prompt = tokenizer.apply_chat_template(
                     messages, tokenize=False, add_generation_prompt=True, enable_thinking=False,
                 )
-                torch.manual_seed(42)
+                torch.manual_seed(SEED)
                 t0 = time.time()
                 raw = json_generator(prompt, max_new_tokens=512, do_sample=False)
                 spans, ok = parse(raw)

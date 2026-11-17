@@ -1,204 +1,111 @@
 # Benchmarking LLMs and VLMs for Automated De-Identification of Clinical Text and Medical Images
 
-Adnana Ivana, Jiatong Li
+Adnana Ivana, Jiatong Li — Code: https://github.com/adnana24i/PHI_Deidentification
 
-# Introduction
+*Markdown copy of `final_report.tex`; the submitted version is `final_report.pdf`.*
 
-Protected health information (PHI), such as names, dates, addresses and ID numbers, appears both in clinical text and burned into the pixels of medical images. We study whether one model family (Qwen) can find and remove PHI in both modalities. The project has two tracks:
+**Abstract.** Protected health information (PHI) appears both in clinical text and burned into the pixels of medical images. We ask whether one model family keeps its de-identification ability when PHI moves from text to pixels. A text track runs Qwen3-0.6B on the synthetic ASQ-PHI queries; an image track lets Qwen3-VL-2B transcribe the text burned into MIDI-B radiographs and classifies the transcript with the same Qwen3-0.6B classifier. Both tracks share one taxonomy, schema, few-shot set and scoring code, and both are compared with Microsoft Presidio. Presidio has the highest recall in both modalities; few-shot prompting raises the LLM's recall on text from 0.29 to 0.43 but hurts on images. The vision step is not the bottleneck: Qwen3-VL read every burned-in name and date correctly. The drop from text to images comes from the classifier, which struggles with the terse, template-like text of image overlays.
 
-- **Text track** (Adnana Ivana): an LLM (Qwen3) finds PHI spans in synthetic clinical queries from ASQ-PHI.
-- **Image track** (Jiatong Li): a VLM (Qwen3-VL) finds PHI in medical images from MIDI-B.
+## 1 Introduction
 
-The task is information extraction, closely related to named entity recognition (NER): given a text, return every PHI span and its category. A missed PHI mention is a real privacy leak, so **recall is our primary metric**.
+Hospitals have to remove PHI such as names, dates and record numbers from clinical notes *and* from the text overlays burned into images before data can be shared. A model that works on one modality but not the other leaves a privacy blind spot. We therefore compare one model family, Qwen3 [9], on both: does it find the same PHI when it appears in pixels instead of text tokens? Because a missed PHI mention is a leak, **recall is our primary metric**.
 
-**Image track.** The image track asks the same question, but for pixels instead of text: can a model find PHI that has been burned directly into a medical image? Our approach is OCR-then-classify — a vision-language model (Qwen3-VL) reads out all the visible text in the image, and that transcript is then classified into the same five PHI categories as the text track, using the same scoring code. That way, if the two tracks end up with different results, we can be fairly confident it is because of the modality, not because we scored them differently.
+The task is information extraction, closely related to named entity recognition (NER): given a text, return every PHI span and its category. Adnana Ivana ran the text track and Jiatong Li the image track.
 
-# Data set
+**Related work.** Clinical text de-identification has long been benchmarked in shared tasks such as i2b2/UTHealth 2014 [5], where the best systems combined rules with machine-learned NER, and rule-heavy tools such as Philter [6] reach very high recall at the cost of over-redaction. More recently, LLMs have been prompted to de-identify text zero-shot (e.g. DeID-GPT [7]), but these studies use large proprietary models and text only. Most gold-standard corpora (i2b2, MIMIC [8]) require a data use agreement; we therefore use two openly licensed synthetic benchmarks, ASQ-PHI [1] and MIDI-B [3]. To our knowledge, the same open model family has not been compared across both modalities.
 
-**Text track: ASQ-PHI.** The file `ASQ/synthetic_clinical_queries.txt` contains synthetic clinical questions. Each query comes with its PHI tags, and each tag has an `identifier_type` and the `value` as it appears in the text.
+## 2 Data sets
 
-- 1051 queries, 2973 gold PHI spans
-- 219 queries contain no PHI at all, which lets us measure over-redaction
-- 13 ASQ PHI types. The most frequent are GEOGRAPHIC_LOCATION (826), NAME (814), DATE (806) and MEDICAL_RECORD_NUMBER (305). Several are very rare: ACCOUNT_NUMBER (4), FAX_NUMBER (2), CERTIFICATE_LICENSE_NUMBER (1) and IP_ADDRESS (1).
+**Text: ASQ-PHI.** ASQ-PHI [1, 2] contains 1051 short, clinician-style search queries generated with GPT-4o through adversarial few-shot prompting. Every identifier is synthetic, so no real patient data is involved; the data is MIT-licensed. The queries hold 2973 gold PHI spans of 13 HIPAA types. 219 queries are *hard negatives*, which look like PHI-bearing queries (ages, diagnoses, years) but contain none, so they measure over-redaction. Short queries are a realistic setting (clinicians typing into a search tool) and differ from the long notes in i2b2, which makes the benchmark complementary.
 
-> **[Dataset source, construction and licence for ASQ-PHI: to be added.]**
+**Images: MIDI-B.** MIDI-B [3] (CC BY 4.0) consists of real, de-identified images from The Cancer Imaging Archive [4] with synthetic PHI written back in. Only the CR, DX and MG modalities (radiography and mammography) carry PHI *in the pixels*; the others only have PHI in the DICOM header, which is not an OCR task. We use these three modalities from the validation split: 76 series, 91 images. In 10 images the burned-in text is patient PHI, always a two-line overlay of the form `SURNAME FIRSTNAME [SEX] DATE / DOB: DATE`; the other 81 serve as negatives (technologist initials such as "TJN" are not PHI in MIDI-B).
 
-**Shared taxonomy.** To compare the two tracks, both datasets are mapped onto five shared labels:
+**Shared taxonomy and the dataset confound.** Both datasets are mapped onto five labels (Table 1). The proposal reviewers noted that a gap between the tracks could come from the data instead of the modality. We control for this in two ways: the cross-modality comparison uses only the labels present in *both* datasets (NAME and DATE), and both tracks use the same classifier, schema, examples and scoring code.
 
-| shared label | ASQ-PHI types | gold spans |
-|---|---|---|
-| NAME | NAME | 814 |
-| DATE | DATE | 806 |
-| LOCATION | GEOGRAPHIC_LOCATION | 826 |
-| CONTACT | phone, fax, email, IP address | 79 |
-| ID | medical record, health plan, SSN, unique ID, account, certificate/licence | 448 |
+| label | ASQ-PHI types | spans | MIDI-B categories | rows |
+|---|---|---|---|---|
+| NAME | NAME | 814 | patient_name | 10 |
+| DATE | DATE | 806 | date, patient_birth_date | 20 |
+| LOCATION | GEOGRAPHIC_LOCATION | 826 | – | 0 |
+| CONTACT | phone, fax, email, IP address | 79 | – | 0 |
+| ID | MRN, SSN, health plan, account, … | 448 | – | 0 |
 
-The reviewers pointed out that a gap between the tracks might come from the datasets and not from the modality. The plan is to compare the tracks only on the shared categories that have enough support in *both* datasets.
+*Table 1: Shared PHI taxonomy with gold counts per dataset.*
 
-**Image track: MIDI-B.** The image dataset is MIDI-B (Medical Image De-Identification Benchmark): real, already de-identified X-ray and mammography images from The Cancer Imaging Archive, with synthetic PHI burned back into them. It is licensed **CC BY 4.0** (DOI `10.7937/cf2p-aw56`), so no data use agreement or registration is needed.
+## 3 Preprocessing
 
-The full release is large — 708 series across a validation and a test split, covering 8 imaging modalities — but we only need a slice of it. We use the **validation split**, and only the **CR, DX and MG modalities** (plain X-ray, digital X-ray, mammography), because those are the only modalities where MIDI-B's PHI generator actually writes text into the pixels; the rest get synthetic PHI in the DICOM header instead, which is no use for an OCR task. That leaves 76 series, 91 images, 2.3 GB — much smaller than the ~65 GB full release.
+ASQ-PHI provides PHI values without positions, so we locate each value in its query by string search, preferring standalone matches ("UCSF" should not match inside "UCSF-12345") and treating curly quotes as straight ones; all 2973 values were found. The model also returns strings rather than offsets, so each predicted span is aligned to the text by exact match, with a case-, quote- and whitespace-insensitive fallback. Spans that cannot be found are *ungrounded* (hallucinated) and count as false positives. No tokenisation or other NLP preprocessing is applied: the model sees the raw query.
 
-Of those 91 images, 35 have some kind of burned-in text redaction according to MIDI-B's own answer key. Most of them, though, are just technologist initials (e.g. "JT", "TJN") that MIDI-B does not treat as patient PHI. Only **10 images** actually carry a redaction that counts as patient PHI under our taxonomy — a small positive set, but a real one. The other 81 are true negatives, which is useful for checking how often a model cries wolf.
+For MIDI-B, each DICOM is converted to an 8-bit PNG (VOI LUT windowing, MONOCHROME1 inverted, first frame of multi-frame scans). The gold burned-in text is taken from MIDI-B's answer key. Since an image has no fixed text, each gold string is located in the OCR transcript being scored with the same alignment code; PHI the OCR missed becomes a false negative.
 
-| shared label | MIDI-B categories | gold rows (this subset) |
-|---|---|---|
-| NAME | patient_name | 10 |
-| DATE | date, patient_birth_date | 20 |
-| LOCATION | *(none present)* | 0 |
-| CONTACT | *(none present)* | 0 |
-| ID | *(none present)* | 0 |
+## 4 Models and conditions
 
-`patient_sex` does not map onto any of our five shared labels, so it is dropped from scoring. In practice, only NAME and DATE show up at all in this subset — no location, contact info or ID ever appears burned into these images — which is why the cross-modality comparison later on only looks at those two categories.
+No model is trained; we compare prompting conditions of pretrained models with an existing tool.
 
-# Preprocessing
+**Text track.** Qwen3-0.6B runs in non-thinking mode with greedy decoding. Outputs are constrained to a Pydantic schema with `outlines` [11], so every output is a valid list of `{type, text}` spans over the five labels. **Zero-shot** gives only instructions and label definitions; **few-shot** adds three hand-written examples (easy, tricky, hard negative) that are not taken from ASQ-PHI, so no test data leaks into the prompt.
 
-ASQ-PHI gives the PHI values but not their positions in the text, so we compute character offsets ourselves:
+**Image track.** Qwen3-VL-2B-Instruct [10] first transcribes all visible text. The transcript then goes through the *same* Qwen3-0.6B classifier, schema and few-shot examples as the text track; only the system prompt says that the input is an OCR transcript and that markers such as "L"/"R" or "PORTABLE" are not PHI. We chose this OCR-then-classify design so that the classification step is identical across tracks.
 
-- **Gold spans:** each tagged value is located in its query by string search, and standalone matches (not inside a longer word) are preferred. Curly quotes are normalised. All gold values were found. One of them (`asq_0149`, "Children's Clinic") matched only after quote normalisation.
-- **Model output:** the LLM returns span strings, not offsets. Each string is aligned to the text with an exact match first and a normalised fuzzy match as a fallback. Strings that cannot be found are marked *ungrounded* and count as false positives.
+**Baseline.** As both reviewers asked for a non-LLM reference point, we use Microsoft Presidio [12], which combines spaCy NER [13] with rule-based recognizers, with default settings; its entity types are mapped onto our labels. For images, `ocrmac` [14] (macOS Vision OCR) supplies the text.
 
-No other NLP preprocessing (tokenisation, lemmatisation, etc.) is applied. The models see the raw query.
+The proposal planned 8B models, but both tracks ran locally on laptops, where the image OCR alone takes 35–90 s per image on CPU, so we used the smallest models. All code, including a shared `phi_deid` package for prompts, alignment and scoring, is in the repository.
 
-**Image track.** Each DICOM is converted to a normal 8-bit PNG before it goes anywhere near the model: VOI LUT windowing is applied so it looks the way a radiologist would actually view it, MONOCHROME1 images are inverted, and for multi-frame scans (breast-tomosynthesis stacks) we only keep the first frame — none of those turned out to have any burned-in PHI anyway.
+## 5 Evaluation
 
-The ground truth comes from MIDI-B's answer-key database. TCIA only distributes this through IBM Aspera (no plain-HTTP download), so it was fetched once by hand. From its per-tag JSON we keep just the `pixels_hidden` entries — the burned-in text itself, its bounding box, font size and PHI category — for our 91 images; the full 2.8 GB database is not kept in the repository.
+A prediction matches a gold span in one of three modes: **strict** (same offsets and label), **overlap** (overlapping characters, same label) and **any** (overlap, label ignored; the privacy view of whether the PHI would be redacted). Matching is one-to-one, and we report micro-averaged precision, recall and F1 in overlap mode unless stated otherwise. At the record level, the **leak-free rate** is the share of records with PHI in which every span was caught, and the **false-alarm rate** the share of PHI-free records in which something was flagged. Strict mode is not used on images: MIDI-B annotates the whole overlay as one box with several labels, so a predicted name alone can never share its boundaries.
 
-One subtlety carries over from the text track: a gold PHI string does not come with a fixed position of its own. It has to be located inside whatever OCR transcript is being scored, using the same exact-match-then-fuzzy-match logic as the text track. If the OCR genuinely missed a piece of text, the gold span simply cannot be found in the transcript — which correctly counts as a false negative rather than crashing the pipeline.
+| condition | text P | text R | text leak-free | text false alarm | image P | image R | image leak-free | image false alarm |
+|---|---|---|---|---|---|---|---|---|
+| Qwen zero-shot | 0.73 | 0.29 | 0.01 | 0.30 | 0.20 | **0.60** | 0.00 | 0.35 |
+| Qwen few-shot | **0.87** | 0.43 | 0.07 | **0.04** | **1.00** | 0.13 | 0.00 | **0.00** |
+| Presidio | 0.62 | **0.77** | **0.31** | 0.90 | 0.59 | 0.57 | **0.50** | 0.04 |
 
-# Model training
+*Table 2: Overall precision and recall (overlap mode) and record-level privacy metrics; text track 1051 queries, image track 91 images. "Qwen" is Qwen3-0.6B on the query text, or on the Qwen3-VL-2B transcript for images.*
 
-No model is trained. We compare prompting conditions of a pretrained LLM against an existing non-LLM tool.
+**Text track.** Few-shot examples help the small LLM considerably (Table 2): recall rises from 0.29 to 0.43, precision from 0.73 to 0.87, and ungrounded spans drop from 23.1% to 1.3%. Presidio still recalls far more (0.77), but it flags something in 90% of PHI-free queries. Figure 1 shows where the differences lie. Presidio finds nearly all names, dates and contact details, but its DATE precision is only 0.40 because it also tags ages ("60-year-old") and bare years, which ASQ-PHI does not count as PHI. Few-shot Qwen is better on IDs (0.87 vs. 0.67), especially record numbers, which have no fixed format for Presidio's rules. LOCATION is hard for every condition, and the LLM rarely finds names (0.29 few-shot, 0.05 zero-shot). Table 3 shows a typical case: zero-shot finds only the date, and few-shot finds nothing.
 
-**LLM (Qwen3).** The current results are from **Qwen3-0.6B**, a small model used to test the pipeline. The proposal plans **Qwen3-8B**, and those runs are still to come. Setup:
+![Figure 1: Text track: recall and precision per category, overlap mode.](results/figures/qwen3-0.6b_per_category.png)
 
-- non-thinking mode and greedy decoding
-- **constrained JSON decoding** (`outlines` with a Pydantic schema), so every output is a valid list of `{type, text}` spans using the five shared labels
-- two conditions:
-  - **zero-shot:** instructions only
-  - **few-shot:** the same instructions plus 3 hand-written examples (easy, tricky, and a hard negative with no PHI). The examples are not taken from ASQ-PHI, so no test data leaks into the prompt.
-- A third condition with Qwen3's "thinking" mode is planned but **has not been run yet**.
-
-**Non-LLM baseline: Microsoft Presidio.** The reviewers asked for a reference point beyond zero-shot vs few-shot. Presidio (`presidio-analyzer`) is an existing PII detector that combines spaCy NER (`en_core_web_lg`) with rule-based recognizers. It runs with default settings and no score threshold. Its entity types are mapped onto the shared labels (e.g. PERSON → NAME, DATE_TIME → DATE, PHONE_NUMBER/EMAIL_ADDRESS/IP_ADDRESS → CONTACT, US_SSN/MEDICAL_LICENSE/… → ID).
-
-All three conditions write the same prediction format and are scored by the same code.
-
-**Image track: Qwen3-VL.** As planned in the proposal, the pipeline has two stages:
-
-1. **OCR.** `Qwen3-VL-2B-Instruct` — the smallest Qwen3-VL model, matching how the text track uses Qwen3-0.6B for local runs — reads out every piece of visible text in an image and returns it as a transcript. It runs on CPU rather than GPU, since its vision encoder is not compatible with Apple's MPS backend on this machine; images are also downsized before being passed in, which keeps inference time manageable without hurting OCR quality.
-2. **Classify.** That transcript then goes through the exact same classifier as the text track: the same `Qwen3-0.6B` model, the same prompt and schema, the same few-shot examples, and the same **zero-shot**/**few-shot** conditions. Keeping this step identical means any difference between tracks should come from the modality, not from using a different classifier.
-
-**Baseline.** As a non-LLM point of comparison, `ocrmac` (macOS's built-in OCR) reads the image, and the same Presidio classifier the text track uses runs on the result.
-
-We did not run a thinking-mode condition for the image track.
-
-# Evaluation
-
-**Metrics.** Each predicted span is compared with the gold spans of the same query in three modes:
-
-| mode | a prediction counts as correct if… |
+| input | predictions |
 |---|---|
-| strict | same start, end and label |
-| overlap | the characters overlap and the label is the same |
-| any | the characters overlap, label ignored. This is the privacy view: *would this PHI have been redacted?* |
+| *ASQ-PHI:* "… for a 34-year-old female diagnosed with MS like **Anna S.**, previously treated at **Methodist Hospital** on **April 12, 2023**?" | zero-shot: DATE "April 12, 2023"<br>few-shot: (none)<br>Presidio: NAME "Anna S.", DATE "April 12, 2023", DATE "34-year-old" |
+| *MIDI-B OCR transcript:* `JONES ERIN [F] 01.12.2019` / `DOB: 11.12.1937` (name and both dates are gold PHI) | zero-shot: DATE "01.12.2019", DATE "11.12.1937"<br>few-shot: NAME "JONES ERIN [F] 01.12.2019", DATE "11.12.1937"<br>Presidio: NAME "JONES ERIN", DATE "01.12.2019", DATE "11.12.1937" |
 
-We report micro-averaged precision, recall and F1, overall, per shared category and per ASQ type. At the query level we report:
+*Table 3: One input per track (gold PHI in bold) and the predicted spans. The OCR transcript is exactly what Qwen3-VL-2B read.*
 
-- **leak-free rate:** the share of queries with PHI where every gold span was caught (any mode)
-- **false-alarm rate:** the share of queries *without* PHI where something was still flagged
+**Image track.** We first checked the OCR step alone: on all 10 PHI-bearing images, the Qwen3-VL-2B transcript contains the name, exam date and date of birth **verbatim**, so every miss below comes from classification. The two LLM conditions fail in opposite ways. Zero-shot over-triggers (precision 0.20): it flags something on 35% of the PHI-free images, often labelling scanner text such as "PORTABLE #6" as an ID, and it **never predicts NAME** on any image, although it finds 90% of the dates. Few-shot under-triggers: it predicts something on only 2 of the 91 images. Its examples are full clinical sentences, and a terse list of overlay fields looks nothing like them. Neither LLM condition fully de-identifies a single image, while Presidio does so for half of them.
 
-Results below are for all 1051 queries.
+**Cross-modality comparison.** Table 4 compares recall on the two shared labels. Zero-shot behaves the same in both modalities: it misses almost all names and finds most dates, so its name blind spot belongs to the model, not to the images. Few-shot keeps its low NAME recall but loses almost all DATE recall on images (0.65 → 0.10), the largest gap we see. Presidio also drops on image dates (1.00 → 0.40), as numeric formats such as "11.12.1937" are less regular than "June 3rd, 2023". Since the OCR was perfect, these gaps are not about reading pixels but about the *form* of the extracted text: capitalised names without context and bare numeric dates, instead of sentences.
 
-**Overall.** In overlap mode, the scores are:
+| condition | NAME text (n=814) | NAME image (n=10) | DATE text (n=806) | DATE image (n=20) |
+|---|---|---|---|---|
+| Qwen zero-shot | 0.05 | 0.00 | 0.83 | 0.90 |
+| Qwen few-shot | 0.29 | 0.20 | 0.65 | 0.10 |
+| Presidio | 1.00 | 0.90 | 1.00 | 0.40 |
 
-| condition | precision | recall | F1 |
-|---|---|---|---|
-| Qwen3-0.6B zero-shot | 0.726 | 0.285 | 0.409 |
-| Qwen3-0.6B few-shot | 0.869 | 0.427 | 0.573 |
-| Presidio | 0.620 | **0.767** | **0.686** |
+*Table 4: Recall on the shared categories, overlap mode, same classifier and scoring code in both tracks.*
 
-![Overall precision, recall and F1 in the three matching modes](results/figures/qwen3-0.6b_overall.png)
+## 6 Discussion and limitations
 
-- **Few-shot examples help the small LLM a lot.** Recall rises from 0.29 to 0.43 and precision from 0.73 to 0.87. The share of ungrounded spans (strings not found in the query) drops from 23.1% to 1.3%.
-- **Presidio has much higher recall than Qwen3-0.6B** (0.77 vs 0.43) but lower precision. With recall as the main metric, the baseline currently wins.
+The image results rest on only 10 PHI-bearing images (30 gold rows), so a single image moves recall by 0.10; they indicate a pattern rather than precise estimates, and LOCATION, CONTACT and ID cannot be compared across modalities at all. Restricting the comparison to shared labels removes category differences but not differences in surface form, which is exactly where our results locate the gap. We used the smallest Qwen models, so the low LLM recall may partly be a size effect. The image pipeline is not one model end to end (Qwen3-VL reads, Qwen3-0.6B classifies). We reused the text few-shot examples for comparability, which likely causes the under-triggering on images. Presidio ran with default settings, which favour recall. Finally, both datasets are synthetic, and ASQ-PHI's short queries may not transfer to full clinical notes.
 
-**Per category.**
+## 7 Conclusion and future work
 
-![Recall and precision per shared category (overlap mode)](results/figures/qwen3-0.6b_per_category.png)
+In both modalities, an off-the-shelf rule-plus-NER tool catches more PHI than a small Qwen3 model, which is more precise and better on record numbers but weak on names. On our central question, the vision step is not the problem: Qwen3-VL-2B read every burned-in identifier correctly, and the loss from text to images happens in classification, because overlay text is terse and template-like. For practical pipelines, a VLM can be trusted to read image overlays, but the PHI classifier must be adapted to their format or combined with rules. Future work should (1) test the planned 8B models and the thinking mode, (2) write few-shot examples that look like OCR transcripts, (3) let the VLM read and classify in one step, and (4) use the MIDI-B test split for more PHI-bearing images.
 
-- **Presidio** finds almost all names, dates and contact details (recall 1.00, 1.00 and 0.97). Its DATE precision is only 0.40, because it also tags ages ("60-year-old") and years on their own ("2023"), which ASQ-PHI does not annotate as PHI.
-- **Few-shot Qwen is better on IDs** (recall 0.87 vs 0.67 for Presidio). This holds for medical record numbers in particular (any mode: 0.92 vs 0.70) and social security numbers (0.67 vs 0.36).
-- **LOCATION is hard for every condition** (recall 0.04 / 0.11 / 0.35), and it is the largest category (826 spans).
-- **The few-shot LLM is weak on names** (recall 0.29), and zero-shot even more so (0.05).
-- Zero-shot DATE recall (0.83) is higher than few-shot (0.65). The few-shot examples do not help every category.
+## References
 
-**Query level.**
-
-![Leak-free rate and false-alarm rate](results/figures/qwen3-0.6b_query_level.png)
-
-- No condition fully de-identifies most queries. The leak-free rate is 0.010 for zero-shot, 0.074 for few-shot and 0.310 for Presidio.
-- Presidio over-redacts heavily: it flags something in 90% of the queries that contain no PHI. For few-shot Qwen this is 3.7%.
-
-**Main outcome so far.** The small Qwen3-0.6B model is precise but misses most PHI. An off-the-shelf tool (Presidio) catches much more, at the cost of many false alarms. Few-shot prompting clearly improves the LLM. Whether a larger model (Qwen3-8B) closes the recall gap is still open.
-
-More figures (e.g. recall per ASQ type) are in `results/figures/`, and all numbers are in `results/*.csv`.
-
-**Image track: results on MIDI-B.** These results cover all 91 images — 10 with PHI, 81 without.
-
-**Overall.** In overlap mode:
-
-| condition | precision | recall | F1 |
-|---|---|---|---|
-| Qwen3-VL zero-shot | 0.198 | 0.600 | 0.298 |
-| Qwen3-VL few-shot | **1.000** | 0.133 | 0.235 |
-| ocrmac + Presidio | 0.586 | 0.567 | **0.576** |
-
-![Overall precision, recall and F1, overlap and any mode (image track)](results/figures/qwen3-vl-2b_overall.png)
-
-Unlike on the text track, the non-LLM baseline wins outright here — not just on recall, but on every metric. Zero-shot does find a reasonable share of the PHI, but at a real cost in precision: it only predicted anything at all on 37 of the 91 images, and a lot of those predictions are hallucinations (24 of them labelled `ID`, usually triggered by things like "PORTABLE #6"). Few-shot goes the other way: it is perfectly precise (1.0), but it barely does anything — it produces a prediction on only **2 of the 91 images**. Our best guess is that reusing the text track's few-shot examples verbatim, for comparability, backfires here: those examples are full clinical sentences, and a short, multi-line OCR transcript does not look anything like them, so the model seems to decide there is nothing to extract.
-
-**Per category.** Only NAME and DATE have any gold examples in this subset.
-
-![Recall and precision per category, overlap mode (image track)](results/figures/qwen3-vl-2b_per_category.png)
-
-The most striking result here: zero-shot never predicts NAME, not even once, across all 91 images — even though it reliably finds dates (recall 0.90). That is not an occasional miss, it is a complete blind spot. The baseline is the only condition that does reasonably well on both categories (NAME 0.90, DATE 0.40). Few-shot's recall on both categories is close to zero, which fits with it barely firing at all.
-
-**Per modality.** With only 10 positive images split across CR, DX and MG (4/4/2), this is more of a rough picture than a precise estimate, but few-shot recalls none of the DX or MG cases.
-
-![Recall per modality, any match](results/figures/qwen3-vl-2b_per_modality.png)
-
-**Image-level privacy metrics.**
-
-| condition | leak-free rate | false-alarm rate |
-|---|---|---|
-| Qwen3-VL zero-shot | 0.000 | 0.346 |
-| Qwen3-VL few-shot | 0.000 | 0.000 |
-| ocrmac + Presidio | **0.500** | 0.037 |
-
-![Leak-free rate and false-alarm rate (image track)](results/figures/qwen3-vl-2b_image_level.png)
-
-Neither LLM condition ever fully de-identifies a PHI-bearing image. The baseline manages it for half of them, with a low false-alarm rate on top.
-
-**Comparing the two tracks.** This is really the question the project is built around: does a model miss more PHI when it is hidden in pixels instead of written out as text? We compare the two tracks on NAME and DATE, the only categories with real examples on both sides, using the same taxonomy and scoring code — so any gap we see should be about the modality, not about how we measured it. One caveat: the two tracks do not run the same model end to end. The text track hands `Qwen3-0.6B` raw text and asks it to find PHI directly; the image track has `Qwen3-VL` turn the image into a transcript first, then hands that transcript to the same `Qwen3-0.6B` prompt. So "zero-shot" and "few-shot" below describe the shared classification step, not one model doing the whole job on both sides.
-
-![Text track vs. image track, same taxonomy, same scoring](results/figures/qwen3-vl-2b_cross_modality.png)
-
-A couple of things stand out. Zero-shot's NAME recall is close to zero on both text (0.05) and images (0.00) — this looks like a weakness of zero-shot Qwen3 itself, not something specific to images. Few-shot's DATE recall, on the other hand, holds up fine on text (0.65) but falls apart on images (0.10) — this is the clearest modality-specific effect we found, and it fits the under-triggering problem above: the few-shot examples are already a stretch for ASQ-PHI's style, and even more of a stretch for a terse OCR transcript. The baseline also does noticeably worse on image dates (0.40) than text dates (1.00), probably because a burned-in format like "DOB: 11.12.1937" is less regular than a written-out date like "June 3rd, 2023".
-
-One more thing worth flagging: for zero-shot, the overall `any`-mode and `overlap`-mode numbers come out identical, which might look like the matching mode does not matter here. It is actually a coincidence of how MIDI-B bundles PHI into one annotation box: under `any` mode, zero-shot's NAME recall jumps to 0.90, but that is not because it suddenly recognises names — its date predictions just happen to sit inside the same box as the name and get credited for it once the label requirement is dropped. The `overlap`-mode numbers above are the ones that actually reflect whether the model gets the category right.
-
-**Main takeaway.** With only 10 positive images, these numbers move in big steps and should not be read too precisely — but the pattern is clear, and it mirrors the text track: the plain non-LLM tool beats both LLM conditions, and here the gap is even wider, because zero-shot has a hard blind spot for names and few-shot barely engages with OCR-style text at all.
-
-# Future work
-
-- Run the planned **Qwen3-8B** model and the **thinking** condition on the full dataset.
-- Look at the remaining errors more closely, especially missed locations and names, and the boundary and label mistakes.
-- Make the comparison with Presidio fairer, e.g. by testing a score threshold or excluding ages and bare years. Its default settings trade precision for recall.
-- Complete the cross-modality comparison with the image track on the shared categories.
-
-**Image track.**
-
-- Try the MIDI-B **test split** as well, and a bigger Qwen3-VL model, to see whether the NAME blind spot and the few-shot under-triggering are about model size or just a prompt mismatch.
-- Write few-shot examples that actually look like OCR transcripts, instead of reusing the text track's clinical-sentence examples — under-triggering on short, fragmented text is now a known failure mode.
-- Try asking Qwen3-VL to localise and classify PHI directly in a single prompt, instead of splitting OCR and classification into two stages, and see if that does any better.
-- Get more than 10 positive images to work with, either from the MIDI-B test split or by relaxing the CR/DX/MG restriction, so the per-category numbers stand on firmer ground.
+1. J. Weatherhead, G. Golovko and P. McCaffrey. ASQ-PHI: An adversarial synthetic data benchmark for clinical de-identification and search utility. *Data in Brief*, 65:112586, 2026. https://doi.org/10.1016/j.dib.2026.112586
+2. J. Weatherhead. ASQ-PHI: An Adversarial Synthetic Benchmark for Clinical De-Identification and Search Utility (v1). Mendeley Data, 2025. https://doi.org/10.17632/csz5dzp7nx.1
+3. MIDI-B: Medical Image De-Identification Benchmark. The Cancer Imaging Archive, 2025. https://doi.org/10.7937/cf2p-aw56
+4. K. Clark et al. The Cancer Imaging Archive (TCIA): Maintaining and operating a public information repository. *Journal of Digital Imaging*, 26(6):1045–1057, 2013.
+5. A. Stubbs, C. Kotfila and Ö. Uzuner. Automated systems for the de-identification of longitudinal clinical narratives: Overview of 2014 i2b2/UTHealth shared task Track 1. *Journal of Biomedical Informatics*, 58:S11–S19, 2015.
+6. B. Norgeot et al. Protected Health Information filter (Philter): accurately and securely de-identifying free-text clinical notes. *npj Digital Medicine*, 3:57, 2020.
+7. Z. Liu et al. DeID-GPT: Zero-shot medical text de-identification by GPT-4. arXiv:2303.11032, 2023.
+8. A. E. W. Johnson et al. MIMIC-III, a freely accessible critical care database. *Scientific Data*, 3:160035, 2016.
+9. Qwen Team. Qwen3 technical report. arXiv:2505.09388, 2025.
+10. Qwen Team. Qwen3-VL-2B-Instruct (model card). Hugging Face, 2025. https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct
+11. B. T. Willard and R. Louf. Efficient guided generation for large language models. arXiv:2307.09702, 2023.
+12. Microsoft. Presidio: Data protection and de-identification SDK. https://github.com/microsoft/presidio
+13. M. Honnibal, I. Montani, S. Van Landeghem and A. Boyd. spaCy: Industrial-strength natural language processing in Python. Zenodo, 2020. https://doi.org/10.5281/zenodo.1212303
+14. ocrmac: A Python wrapper for the macOS Vision OCR framework. https://github.com/straussmaximilian/ocrmac

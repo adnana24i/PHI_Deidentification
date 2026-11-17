@@ -5,41 +5,22 @@ import csv
 import json
 import time
 from importlib.metadata import version
+from pathlib import Path
 
 from paths import IMAGES_DIR, PRED_DIR
 
+from phi_deid.presidio_baseline import presidio_spans
+
 OUT = PRED_DIR / "qwen3-vl-2b_presidio.jsonl"
 
-PRESIDIO_TO_SHARED = {
-    "PERSON": "NAME",
-    "DATE_TIME": "DATE",
-    "LOCATION": "LOCATION",
-    "PHONE_NUMBER": "CONTACT", "EMAIL_ADDRESS": "CONTACT", "IP_ADDRESS": "CONTACT",
-    "US_SSN": "ID", "MEDICAL_LICENSE": "ID", "US_DRIVER_LICENSE": "ID", "US_PASSPORT": "ID",
-    "US_BANK_NUMBER": "ID", "US_ITIN": "ID", "CREDIT_CARD": "ID", "IBAN_CODE": "ID", "UK_NHS": "ID",
-}
 
-
-def ocrmac_transcript(png_path):
+def ocrmac_transcript(png_path: Path) -> str:
     from ocrmac import ocrmac
     results = ocrmac.OCR(str(png_path)).recognize()
     return "\n".join(text for text, _conf, _box in results)
 
 
-def presidio_spans(analyzer, text):
-    spans, seen = [], set()
-    for res in sorted(analyzer.analyze(text=text, language="en"), key=lambda r: (r.start, r.end)):
-        label = PRESIDIO_TO_SHARED.get(res.entity_type)
-        if label is None or (res.start, res.end, label) in seen:
-            continue
-        seen.add((res.start, res.end, label))
-        spans.append({"type": label, "text": text[res.start:res.end], "start": res.start, "end": res.end,
-                      "grounded": True, "match": "exact",
-                      "presidio_type": res.entity_type, "score": round(res.score, 2)})
-    return spans
-
-
-def main():
+def main() -> None:
     rows = list(csv.DictReader((IMAGES_DIR / "manifest.csv").open()))
     done = {json.loads(l)["id"] for l in OUT.open()} if OUT.exists() else set()
     todo = [r for r in rows if r["sop_instance_uid"] not in done]

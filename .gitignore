@@ -5,3 +5,15 @@ data/midi-b/dicom/
 __pycache__/
 *.pyc
 .DS_Store
+*.egg-info/
+.pytest_cache/
+.venv/
+.ipynb_checkpoints/
+
+# LaTeX build files (final_report.pdf is kept)
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz

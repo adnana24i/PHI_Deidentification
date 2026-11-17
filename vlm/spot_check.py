@@ -8,6 +8,7 @@ Output: results/figures/qwen3-vl-2b_spotcheck_<SOPInstanceUID>.png
 
 import json
 import sys
+from pathlib import Path
 
 import pandas as pd
 from paths import FIGURES_DIR, GROUND_TRUTH_PATH, IMAGES_DIR, PRED_DIR, RESULTS_DIR
@@ -17,7 +18,7 @@ MODEL_TAG = "qwen3-vl-2b"
 CONDITIONS = ["zeroshot", "fewshot", "presidio"]
 
 
-def load_gold_boxes():
+def load_gold_boxes() -> dict[str, list[dict]]:
     boxes = {}
     for line in GROUND_TRUTH_PATH.open():
         rec = json.loads(line)
@@ -26,7 +27,7 @@ def load_gold_boxes():
     return boxes
 
 
-def load_predictions():
+def load_predictions() -> dict[str, dict[str, dict]]:
     preds = {}
     for c in CONDITIONS:
         path = PRED_DIR / f"{MODEL_TAG}_{c}.jsonl"
@@ -34,7 +35,7 @@ def load_predictions():
     return preds
 
 
-def annotate(uid, gold_boxes, out_path):
+def annotate(uid: str, gold_boxes: dict[str, list[dict]], out_path: Path) -> None:
     img = Image.open(IMAGES_DIR / f"{uid}.png").convert("RGB")
     draw = ImageDraw.Draw(img)
     for span in gold_boxes.get(uid, []):
@@ -44,7 +45,8 @@ def annotate(uid, gold_boxes, out_path):
     img.save(out_path)
 
 
-def report(uid, gold_boxes, preds, outcomes):
+def report(uid: str, gold_boxes: dict[str, list[dict]], preds: dict[str, dict[str, dict]],
+           outcomes: pd.DataFrame) -> None:
     print(f"\n{'='*90}\n{uid}")
     if uid in gold_boxes:
         for span in gold_boxes[uid]:
@@ -68,7 +70,7 @@ def report(uid, gold_boxes, preds, outcomes):
             print(f"  [{c}] {s['type']:8s} {s['text']!r:35s} -> {tag}")
 
 
-def main():
+def main() -> None:
     gold_boxes = load_gold_boxes()
     preds = load_predictions()
     outcomes = pd.read_csv(RESULTS_DIR / f"{MODEL_TAG}_outcomes.csv")
